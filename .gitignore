@@ -1,6 +1,2 @@
-# Project place file
-/Flight Racing.rbxlx
-
-# Roblox Studio lock files
-/*.rbxlx.lock
-/*.rbxl.lock
+*.lock
+Packages
