@@ -136,11 +136,11 @@ function SimpleRigidBody.physics(self: SimpleRigidBody, dt: number)
 	self:updateAngular(dt)
 
 	local linearVelocity = self.linearVelocity
-	local angularVelocity = self.angularVelocity
+	local angularVelocity = self.root.CFrame:VectorToObjectSpace(self.angularVelocity)
 
 	local positionOffset = linearVelocity * dt
 	local rotationOffset = angularVelocity * dt
-	local rotationAngles = CFrame.Angles(rotationOffset.x, rotationOffset.y, rotationOffset.z)
+	local rotationAngles = CFrame.Angles(rotationOffset.X, rotationOffset.Y, rotationOffset.Z)
 
 	local positionedCF = self.cframe + positionOffset
 	if self:checkCollision(positionedCF, workspace) then
