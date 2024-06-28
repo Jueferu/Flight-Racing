@@ -29,6 +29,7 @@ function SimpleRigidBody.new(root: BasePart)
 	self.mass = 1
 
 	self.useGravity = true
+	self.canCollide = true
 
 	self.force = Vector3.new()
 	self.torque = Vector3.new()
@@ -75,8 +76,7 @@ end
 
 function SimpleRigidBody.updateLinear(self: SimpleRigidBody, dt: number)
 	if self.useGravity then
-		local gravityForce = Vector3.new(0, -workspace.Gravity, 0) * self.mass
-		self.force += gravityForce
+		self.force += Vector3.new(0, -self.mass * workspace.Gravity, 0)
 	end
 	
 	local acceleration = self.force / self.mass
@@ -120,6 +120,10 @@ function SimpleRigidBody.updateAngular(self: SimpleRigidBody, dt: number)
 end
 
 function SimpleRigidBody.checkCollision(self: SimpleRigidBody, newCFrame: CFrame, worldModel: WorldModel)
+	if not self.canCollide then
+		return false
+	end
+	
 	local currentCFrame = self.cframe
 	local direction = newCFrame.Position - currentCFrame.Position
 
@@ -144,10 +148,13 @@ function SimpleRigidBody.physics(self: SimpleRigidBody, dt: number)
 
 	local positionedCF = self.cframe + positionOffset
 	if self:checkCollision(positionedCF, workspace) then
+		self.linearVelocity = Vector3.zero
 		return
 	end
+	
 	local rotatedCF = positionedCF * rotationAngles
 	if self:checkCollision(rotatedCF, workspace) then
+		self.angularVelocity = Vector3.zero
 		return
 	end
 
