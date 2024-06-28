@@ -1,6 +1,4 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local GoodSignal = require(Packages:WaitForChild("GoodSignal"))
@@ -11,57 +9,6 @@ local Utilities = require(Shared:WaitForChild("Utilities"))
 local AnimationCurve = require(Shared:WaitForChild("AnimationCurve"))
 
 local SimpleRigidBody = require(Shared:WaitForChild("SimpleRigidBody"))
-
-local function sqrMagnitude(vector: Vector3): number
-	local dot = vector:Dot(vector)
-	return math.sqrt(dot)
-end
-
-local function projectOnPlane(vector: Vector3, planeNormal: Vector3): Vector3
-	local dot = vector:Dot(planeNormal)
-	return vector - planeNormal * dot
-end
-
-local function vectorToRad(vector: Vector3): Vector3
-	return Vector3.new(math.rad(vector.X), math.rad(vector.Y), math.rad(vector.Z))
-end
-
-local function vectorToDeg(vector: Vector3): Vector3
-	return Vector3.new(math.deg(vector.X), math.deg(vector.Y), math.deg(vector.Z))
-end
-
-local function vectorScale(vector: Vector3, scale: Vector3): Vector3
-	local x = vector.X * scale.X
-	local y = vector.Y * scale.Y
-	local z = vector.Z * scale.Z
-	return Vector3.new(x, y, z)
-end
-
-local function Vector3Angle(vector: Vector3, vector2: Vector3): number
-	local dot = vector:Dot(vector2)
-	return math.acos(dot / (vector.Magnitude * vector2.Magnitude))
-end
-
-local function Vector3RotateTowards(
-	current: Vector3,
-	target: Vector3,
-	maxRadiansDelta: number,
-	maxMagnitudeDelta: number
-)
-	local angle = Vector3Angle(current, target)
-	if angle == 0 then
-		return target
-	end
-
-	local t = math.min(1, maxRadiansDelta / angle)
-	local newAngle = angle * t
-	local axis = current:Cross(target).Unit
-	local rotation = CFrame.fromAxisAngle(axis, newAngle)
-
-	local newVector = rotation:VectorToWorldSpace(current)
-	local magnitude = math.min(target.Magnitude, current.Magnitude + maxMagnitudeDelta)
-	return newVector.Unit * magnitude
-end
 
 function CalculateGForce(angularVelocity: Vector3, velocity: Vector3)
 	return angularVelocity:Cross(velocity)
@@ -187,13 +134,10 @@ function Aircraft.new(root: BasePart): Aircraft
 
 	self.EffectiveInput = Vector3.zero
 
-	self.thurstMultiplier = 2500
+	self.thurstMultiplier = 100
 	self.maxThrust = self.thurstMultiplier * self.mass
-	if self.Player == Players.LocalPlayer and RunService:IsClient() then
-		self.maxThrust = self.root.Mass * self.thurstMultiplier
-	end
 	self.throttleSpeed = 0.25
-	self.gLimit = self.thurstMultiplier * (1 / 10)
+	self.gLimit = 12
 	self.gLimitPitch = self.gLimit * 2
 	self.throttleInput = 0
 
@@ -203,9 +147,9 @@ function Aircraft.new(root: BasePart): Aircraft
 	self.flapsAOABias = 1
 	self.flapsDrag = 5
 	self.flapsRetractSpeed = 115
-	self.turnSpeed = Vector3.new(60, 15, 180 * 0.5)
+	self.turnSpeed = Vector3.new(60, 15, 90) * 20
 	self.turnAcceleration = self.turnSpeed * 2
-	self.angularDrag = Vector3.one
+	self.angularDrag = Vector3.one * 1
 	self.airbrakeDrag = 5
 	self.liftPower = 150
 
@@ -227,14 +171,15 @@ function Aircraft.new(root: BasePart): Aircraft
 end
 
 function Aircraft.SetThrottleInput(self: Aircraft, input: number)
-	if self.Health <= 0 then
+	if false then
 		return
 	end
-	self.throttleInput = input
+
+	self.throttleInput = math.clamp(input, -1, 1)
 end
 
 function Aircraft.SetControlInput(self: Aircraft, input: Vector3)
-	if self.Health <= 0 then
+	if false then
 		return
 	end
 
@@ -272,15 +217,14 @@ function Aircraft.CalculateState(self: Aircraft)
 	end
 
 	self.Velocity = velocity
-	self.LocalVelocity = self.CFrame:VectorToObjectSpace(velocity)
-	self.LocalAngularVelocity = self.CFrame:VectorToObjectSpace(angularVelocity)
-
+	self.LocalVelocity = self.cframe:VectorToObjectSpace(velocity)
+	self.LocalAngularVelocity = self.cframe:VectorToObjectSpace(angularVelocity)
 	self:CalculateAngleOfAttack()
 end
 
 function Aircraft.CalculateAngleOfAttack(self: Aircraft)
 	local LocalVelocity = self.LocalVelocity * Vector3.new(1, 1, -1)
-	if sqrMagnitude(LocalVelocity) < 0.1 then
+	if LocalVelocity.Magnitude < 0.1 then
 		self.AngleOfAttack = 0
 		self.AngleOfAttackYaw = 0
 		return
@@ -292,7 +236,7 @@ end
 
 function Aircraft.CalculateGForce(self: Aircraft, deltaTime: number)
 	local acceleration = (self.Velocity - self._lastVelocity) / deltaTime
-	self.LocalGForce = self.root.CFrame:VectorToObjectSpace(acceleration) * Vector3.new(1, -1, 1) -- / 9.81 -- Convert to Gs
+	self.LocalGForce = self.cframe:VectorToObjectSpace(acceleration) * Vector3.new(1, -1, 1) -- / 9.81 -- Convert to Gs
 	self._lastVelocity = self.Velocity
 end
 
@@ -305,7 +249,7 @@ function Aircraft.CalculateGLimiter(self: Aircraft, controlInput: Vector3, maxAn
 	local maxInput = controlInput.Unit
 
 	local limit = self:CalculateGForceLimit(controlInput)
-	local maxGForce = CalculateGForce(vectorScale(maxInput, maxAngularVelocity), self.LocalVelocity)
+	local maxGForce = CalculateGForce(maxInput * maxAngularVelocity, self.LocalVelocity)
 
 	if maxGForce.Magnitude > limit.Magnitude then
 		return limit.Magnitude / maxGForce.Magnitude
@@ -329,15 +273,17 @@ function Aircraft.UpdateThurst(self: Aircraft)
 	local maxThrust = self.maxThrust
 	local Throttle = self.Throttle
 
-	local force = Vector3.zAxis * (maxThrust * Throttle)
+	local force = -Vector3.zAxis * (maxThrust * Throttle)
 	self:addRelativeForce(force, "Force")
 end
 
 function Aircraft.UpdateAngularDrag(self: Aircraft)
 	local av = self.LocalAngularVelocity
-	local drag = sqrMagnitude(av) * -av.Unit
+	-- it used to be: --sqrMagnitude(av) * -av.Unit
+	-- but like why? it's just a negative vector
+	local drag = -av * 0.1
 
-	local vector = vectorScale(drag, self.angularDrag)
+	local vector = drag * self.angularDrag
 
 	if vector ~= vector then
 		vector = Vector3.zero
@@ -348,7 +294,7 @@ end
 
 function Aircraft.UpdateDrag(self: Aircraft)
 	local LocalVelocity = self.LocalVelocity * Vector3.new(1, 1, -1)
-	local LocalVelocity2 = sqrMagnitude(LocalVelocity)
+	local LocalVelocity2 = LocalVelocity.Magnitude
 
 	local airbrakeDrag = if self.AirbrakeDeployed then self.airbrakeDrag else 0
 	local flapsDrag = if self.FlapsDeployed then self.flapsDrag else 0
@@ -359,18 +305,17 @@ function Aircraft.UpdateDrag(self: Aircraft)
 		self.dragLeft:Evaluate(math.abs(LocalVelocity.X)),
 		self.dragTop:Evaluate(math.abs(LocalVelocity.Y)),
 		self.dragBottom:Evaluate(math.abs(LocalVelocity.Y)),
-		self.dragForward:Evaluate(math.abs(LocalVelocity.Z)) + airbrakeDrag + flapsDrag,
-		self.dragBack:Evaluate(math.abs(LocalVelocity.Z))
+		self.dragForward:Evaluate(math.abs(LocalVelocity.Z * -1)) + airbrakeDrag + flapsDrag,
+		self.dragBack:Evaluate(math.abs(LocalVelocity.Z * -1))
 	)
 
-	local drag = coefficient.Magnitude * LocalVelocity2 * -LocalVelocity.Unit
-	drag *= Vector3.new(1, 1, -1)
+	local drag = coefficient.Magnitude * LocalVelocity2 * LocalVelocity.Unit
 
 	if drag ~= drag then
 		return
 	end
 
-	self:addRelativeForce(drag)
+	self:addRelativeForce(drag, "Force")
 end
 
 function Aircraft.CalculateLift(
@@ -381,8 +326,8 @@ function Aircraft.CalculateLift(
 	aoaCurve,
 	inducedDragCurve
 )
-	local liftVelocity = projectOnPlane(self.LocalVelocity, rightAxis)
-	local liftVelocity2 = sqrMagnitude(liftVelocity)
+	local liftVelocity = Utilities.Vector3.ProjectOnPlane(self.LocalVelocity * Vector3.new(1, 1, -1), rightAxis)
+	local liftVelocity2 = liftVelocity.Magnitude
 
 	local liftCoefficient = aoaCurve:Evaluate(angleOfAttack)
 	local liftForce = liftVelocity2 * liftCoefficient * liftPower
@@ -401,8 +346,8 @@ function Aircraft.CalculateLift(
 end
 
 function Aircraft.UpdateLift(self: Aircraft)
-	local LocalVelocity = self.LocalVelocity
-	if sqrMagnitude(LocalVelocity) < 0.1 then
+	local LocalVelocity = self.LocalVelocity * Vector3.new(1, 1, -1)
+	if LocalVelocity.Magnitude < 0.1 then
 		return
 	end
 
@@ -416,7 +361,6 @@ function Aircraft.UpdateLift(self: Aircraft)
 		self.liftAOACurve,
 		self.inducedDragCurve
 	)
-	liftForce *= Vector3.new(1, -1, 1)
 
 	local yawForce = self:CalculateLift(
 		self.AngleOfAttackYaw,
@@ -454,10 +398,11 @@ function Aircraft.UpdateSteering(self: Aircraft, deltaTime: number)
 	local speed = math.max(0, -self.LocalVelocity.Z)
 	local steeringPower = self.steeringCurve:Evaluate(speed)
 
-	local gForceScaling = self:CalculateGLimiter(self.controlInput, vectorToRad(self.turnSpeed) * steeringPower)
+	local gForceScaling =
+		self:CalculateGLimiter(self.controlInput, Utilities.Vector3.ToRad(self.turnSpeed) * steeringPower)
 
-	local targetAV = vectorScale(self.controlInput, self.turnSpeed * steeringPower * gForceScaling)
-	local av = vectorToDeg(self.LocalAngularVelocity)
+	local targetAV = self.controlInput * (self.turnSpeed * steeringPower * gForceScaling)
+	local av = Utilities.Vector3.ToDeg(self.LocalAngularVelocity)
 	local turnAcceleration = self.turnAcceleration
 
 	local correction = Vector3.new(
@@ -466,24 +411,8 @@ function Aircraft.UpdateSteering(self: Aircraft, deltaTime: number)
 		self:CalculateSteering(deltaTime, av.Z, targetAV.Z, turnAcceleration.Z * steeringPower)
 	)
 
-	local torque = vectorToRad(correction)
+	local torque = Utilities.Vector3.ToRad(correction)
 	self:addRelativeTorque(torque, "VelocityChange")
-
-	local correctionInput = Vector3.new(
-		math.clamp((targetAV.X - av.X) / turnAcceleration.X, -1, 1),
-		math.clamp((targetAV.Y - av.Y) / turnAcceleration.Y, -1, 1),
-		math.clamp((targetAV.Z - av.Z) / turnAcceleration.Z, -1, 1)
-	)
-
-	local effectiveInput = (correctionInput + self.controlInput) * gForceScaling
-
-	local EffectiveInput = Vector3.new(
-		math.clamp(effectiveInput.X, -1, 1),
-		math.clamp(effectiveInput.Y, -1, 1),
-		math.clamp(effectiveInput.Z, -1, 1)
-	)
-
-	self.EffectiveInput = EffectiveInput
 end
 
 function Aircraft.UpdateWeapons(self: Aircraft, deltaTime: number)
@@ -511,17 +440,20 @@ function Aircraft.UpdateMissileLock(self: Aircraft, deltaTime: number)
 		local error = self.Target.Root.Position - self.root.Position
 		local errorDir = self.root.CFrame:VectorToObjectSpace(error.Unit)
 
-		if error.Magnitude <= self.LockRange and Vector3Angle(-Vector3.zAxis, errorDir) <= self.LockAngle then
+		if
+			error.Magnitude <= self.LockRange
+			and Utilities.Vector3.Angle(-Vector3.zAxis, errorDir) <= self.LockAngle
+		then
 			self.MissileTracking = true
 			targetDir = errorDir
 		end
 	end
 
 	self.MissileLockDirection =
-		Vector3RotateTowards(self.MissileLockDirection, targetDir, math.rad(self.LockSpeed) * deltaTime, 0)
+		Utilities.Vector3.RotateTowards(self.MissileLockDirection, targetDir, math.rad(self.LockSpeed) * deltaTime, 0)
 	self.MissileLocked = self.Target
 		and self.MissileTracking
-		and Vector3Angle(self.MissileLockDirection, targetDir) < self.LockSpeed * deltaTime
+		and Utilities.Vector3.Angle(self.MissileLockDirection, targetDir) < self.LockSpeed * deltaTime
 
 	if self.MissileLockDirection ~= self.MissileLockDirection then
 		self.MissileLockDirection = -Vector3.zAxis
@@ -577,7 +509,6 @@ function Aircraft.UpdateCannon(self: Aircraft, _: number)
 
 	self.CannonFiringTimer = 60 / self.CannonFireRate
 	self.FiredCannon:Fire()
-	print("FIREEEE")
 end
 
 function Aircraft.Update(self: Aircraft, deltaTime: number)
@@ -590,7 +521,7 @@ function Aircraft.Update(self: Aircraft, deltaTime: number)
 	self:CalculateGForce(deltaTime)
 	self:UpdateFlaps()
 
-	if self.Health <= 0 then
+	if false then
 		local motor: VectorForce = self.root.MotorVectorForce
 
 		if motor.RelativeTo ~= Enum.ActuatorRelativeTo.World then
@@ -612,21 +543,6 @@ function Aircraft.Update(self: Aircraft, deltaTime: number)
 
 	self:CalculateState()
 	--self:UpdateWeapons(deltaTime)
-end
-
-function Aircraft.Start(self: Aircraft)
-	local model = self.Model
-	local modelRoot = model.PrimaryPart
-
-	local hardpoints = {}
-	for _, v in ipairs(modelRoot:GetChildren()) do
-		if v.Name == "Hardpoint" then
-			table.insert(hardpoints, v)
-			table.insert(self.MissileReloadTimers, 0)
-		end
-	end
-
-	self._Hardpoints = hardpoints
 end
 
 return Aircraft
