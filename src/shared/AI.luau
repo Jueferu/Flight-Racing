@@ -306,7 +306,7 @@ function AI.new(aircraft: Aircraft.Aircraft)
 	local self = setmetatable({}, AI)
 
 	self.steeringSpeed = 25
-	self.desiredSpeed = 0
+	self.targetThrottle = 0
 
 	self.groundCollisionMask = RaycastParams.new()
 	self.groundCollisionMask.FilterDescendantsInstances = { aircraft.root.Parent }
@@ -353,7 +353,14 @@ function AI.new(aircraft: Aircraft.Aircraft)
 	self.aircraft = aircraft
 	self.incomingMissile = nil
 
+	self.enemies = {} :: { Aircraft.Aircraft }
+	self.allies = {} :: { Aircraft.Aircraft }
+
 	return self
+end
+
+function AI.FindBestTarget(self: AI): Aircraft.Aircraft?
+	return self.enemies[1] -- temporary
 end
 
 --[=[
@@ -363,10 +370,35 @@ end
 ]=]
 function AI.GetTargetPosition(self: AI)
 	local aircraft = self.aircraft
-	local target = aircraft.Target
+	local target = self:FindBestTarget()
 
 	if not target then
-		return aircraft.cframe.Position
+		local allies = self.allies
+		local cohesion = Vector3.zero
+		local separation = Vector3.zero
+		local alignment = Vector3.zero
+		
+		local radius = 10
+
+		for _, ally in ipairs(allies) do
+			if ally == self.aircraft then continue end
+			cohesion += ally.cframe.Position
+			alignment += ally.cframe.LookVector
+
+			local dist = (ally.cframe.Position - aircraft.cframe.Position).Magnitude
+			if dist >= radius then
+				continue
+			end
+
+			separation -= (ally.cframe.Position - aircraft.cframe.Position)
+		end
+
+		cohesion /= (#allies - 1)
+		alignment /= (#allies - 1)
+		alignment *= 100
+
+		local targetPosition = cohesion + separation + alignment
+		return targetPosition
 	end
 
 	local targetPosition = target.cframe.Position
@@ -646,35 +678,45 @@ function AI.GetThrottleSpeedForTurn(self: AI, targetPosition): number
 	local angle = Utilities.Vector3.Angle(forward, targetDir)
 	local turn = angle / math.rad(360)
 
+	turn = if turn == turn then turn else 0
+	turn = 1 - turn
+
 	return math.clamp(turn, 0, 1)
 end
 
 function AI.WillGoOutOfBounds(self: AI) : Vector3
-	local BOUNDS = Region3.new(Vector3.new(-1000, 100, -1000), Vector3.new(1000, 1000, 1000))
+	local bounds = {
+		x = { min = -1024, max = 1024 },
+		y = { min = 100, max = 500 },
+		z = { min = -1024, max = 1024 }
+	}
 
 	local aircraft = self.aircraft
 	local origin = aircraft.cframe
 	local direction = self.aircraft.linearVelocity
 
 	local nextPosition = origin.Position + direction
-	if not Utilities.Region3.ContainsPoint(BOUNDS, nextPosition) then
-		-- we need to figure out the normal
+	local normal = Vector3.zero
 
-		local size = BOUNDS.Size
-		local halfSize = size / 2
-		local center = BOUNDS.CFrame.Position
-		local relativePoint = nextPosition - center
-
-		local normal = Vector3.new(
-			math.abs(relativePoint.X) > halfSize.X and math.sign(relativePoint.X) or 0,
-			math.abs(relativePoint.Y) > halfSize.Y and math.sign(relativePoint.Y) or 0,
-			math.abs(relativePoint.Z) > halfSize.Z and math.sign(relativePoint.Z) or 0
-		)
-
-		return origin.Position + (normal * direction.Magnitude)
+	if nextPosition.X < bounds.x.min then
+		normal = Vector3.new(1, 0, 0)
+	elseif nextPosition.X > bounds.x.max then
+		normal = Vector3.new(-1, 0, 0)
+	elseif nextPosition.Y < bounds.y.min then
+		normal = Vector3.new(0, 1, 0)
+	elseif nextPosition.Y > bounds.y.max then
+		normal = Vector3.new(0, -1, 0)
+	elseif nextPosition.Z < bounds.z.min then
+		normal = Vector3.new(0, 0, 1)
+	elseif nextPosition.Z > bounds.z.max then
+		normal = Vector3.new(0, 0, -1)
 	end
 
-	return Vector3.zero
+	if normal.Magnitude > 0 then
+		return true, origin.Position + (normal * 100)
+	end
+
+	return false
 end
 
 --[=[
@@ -688,17 +730,25 @@ function AI.Update(self: AI, deltaTime: number)
 	local emergency = false
 
 	local targetPosition = self:GetTargetPosition()
-	local outOfBounds = self:WillGoOutOfBounds()
-	if outOfBounds then
-		targetPosition = outOfBounds
+	local isOutOfBounds, boundsCorrectionTarget = self:WillGoOutOfBounds()
+	if isOutOfBounds then
+		targetPosition = boundsCorrectionTarget
 		emergency = true
 	end
+
+	steering = self:CalculateSteering(deltaTime, targetPosition)
 
 	table.insert(self.inputQueue, { time = os.clock(), targetPosition = targetPosition })
 	self.aircraft:SetThrottleInput(self:CalculateThrottle())
 
 	local targetThrottle = self:GetThrottleSpeedForTurn(targetPosition)
 	self.targetThrottle = targetThrottle
+
+	local aColor = Color3.new(0, 1, 0)
+	local bColor = Color3.new(1, 0, 0)
+	local alpha = self.aircraft.Throttle
+	local throttleColor = aColor:Lerp(bColor, alpha)
+	self.aircraft.root.Color = throttleColor
 
 	if emergency then
 		self.aircraft:SetControlInput(steering)
