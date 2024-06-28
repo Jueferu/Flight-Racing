@@ -1,5 +1,6 @@
 local Utilities = {}
 Utilities.Vector3 = {}
+Utilities.Region3 = {}
 
 function Utilities.MoveTo(value, target, speed, deltaTime, min, max)
 	local diff = target - value
